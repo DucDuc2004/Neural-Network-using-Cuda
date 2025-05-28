@@ -271,7 +271,8 @@ int main() {
     
     // Tham số huấn luyện
     float lr = 0.01f;  // Learning rate
-    int epochs = 20;   // Số epoch
+    int epochs = 50;   // Số epoch
+
     int batch_size = 100; // Kích thước batch
     int num_batches = (num_train + batch_size - 1) / batch_size;
     

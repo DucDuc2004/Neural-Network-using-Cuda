@@ -129,8 +129,8 @@ float cross_entropy(const std::vector<float>& probs, int label) {
 
 int main() {
     // Doc du lieu anh va nhan tu file
-    auto train_images = read_mnist_images("train-images-idx3-ubyte/train-images.idx3-ubyte");
-    auto train_labels = read_mnist_labels("train-labels-idx1-ubyte/train-labels.idx1-ubyte");
+    auto train_images = read_mnist_images("train-images.idx3-ubyte");
+    auto train_labels = read_mnist_labels("train-labels.idx1-ubyte");
 
     // Khoi tao mang MLP 3 lop
     Layer l1(784, 128);
@@ -138,7 +138,7 @@ int main() {
     Layer l3(64, 10);
 
     float lr = 0.01f; // Learning rate
-    int epochs = 10;  // So epoch
+    int epochs = 50;  // So epoch
 
     std::ofstream csv_file("training_results.csv");
     csv_file << "Epoch,Time (seconds),Loss,Accuracy\n";
@@ -182,8 +182,8 @@ int main() {
     }
 
         // Đọc tập test
-        auto test_images = read_mnist_images("t10k-images-idx3-ubyte/t10k-images.idx3-ubyte");
-        auto test_labels = read_mnist_labels("t10k-labels-idx1-ubyte/t10k-labels.idx1-ubyte");
+        auto test_images = read_mnist_images("t10k-images.idx3-ubyte");
+        auto test_labels = read_mnist_labels("t10k-labels.idx1-ubyte");
     
         int test_correct = 0;
         for (size_t i = 0; i < test_images.size(); ++i) {
