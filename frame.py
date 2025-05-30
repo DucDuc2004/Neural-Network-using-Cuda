@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 # Đọc dữ liệu từ file CSV
-df = pd.read_csv('/home/datto/code/Neural-Network-using-Cuda/training_results.csv')
+df = pd.read_csv('training_results_cuda.csv')
 
 # Khởi tạo biểu đồ
 fig, ax1 = plt.subplots(figsize=(12, 6))

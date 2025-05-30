@@ -162,9 +162,10 @@ public:
     float *d_weights, *d_bias;
     float *d_weight_updates, *d_bias_updates;
     float *d_input, *d_output, *d_grad_input;
+    int allocated_batch_size;
     
     CudaLayer(int input_size, int output_size) : 
-        input_size(input_size), output_size(output_size) {
+        input_size(input_size), output_size(output_size), allocated_batch_size(0) {
         
         // Khởi tạo trọng số và bias trên GPU
         CUDA_CHECK(cudaMalloc(&d_weights, output_size * input_size * sizeof(float)));
@@ -194,6 +195,9 @@ public:
     }
     
     ~CudaLayer() {
+        if (allocated_batch_size > 0) {
+            free_io_memory();
+        }
         cudaFree(d_weights);
         cudaFree(d_bias);
         cudaFree(d_weight_updates);
@@ -201,18 +205,31 @@ public:
     }
     
     void allocate_io_memory(int batch_size) {
+        if (allocated_batch_size > 0) {
+            free_io_memory();
+        }
+        
         CUDA_CHECK(cudaMalloc(&d_input, batch_size * input_size * sizeof(float)));
         CUDA_CHECK(cudaMalloc(&d_output, batch_size * output_size * sizeof(float)));
         CUDA_CHECK(cudaMalloc(&d_grad_input, batch_size * input_size * sizeof(float)));
+        allocated_batch_size = batch_size;
     }
     
     void free_io_memory() {
-        cudaFree(d_input);
-        cudaFree(d_output);
-        cudaFree(d_grad_input);
+        if (allocated_batch_size > 0) {
+            cudaFree(d_input);
+            cudaFree(d_output);
+            cudaFree(d_grad_input);
+            allocated_batch_size = 0;
+        }
     }
     
     float* forward(float* input, int batch_size) {
+        // Kiểm tra và cấp phát lại bộ nhớ nếu batch size khác
+        if (batch_size != allocated_batch_size) {
+            allocate_io_memory(batch_size);
+        }
+        
         // Lưu đầu vào để sử dụng trong backward
         CUDA_CHECK(cudaMemcpy(d_input, input, batch_size * input_size * sizeof(float), cudaMemcpyDeviceToDevice));
         
@@ -272,8 +289,7 @@ int main() {
     // Tham số huấn luyện
     float lr = 0.01f;  // Learning rate
     int epochs = 50;   // Số epoch
-
-    int batch_size = 100; // Kích thước batch
+    int batch_size = 1; // Kích thước batch
     int num_batches = (num_train + batch_size - 1) / batch_size;
     
     // Cấp phát bộ nhớ cho batch và softmax
@@ -416,36 +432,40 @@ int main() {
     float test_accuracy = 100.0f * test_correct / num_test;
     std::cout << "Test Accuracy: " << test_accuracy << "%" << std::endl;
     
-    // In ra dự đoán của 10 ảnh đầu tiên
+    // In ra dự đoán của 10 ảnh đầu tiên (xử lý từng ảnh một để tránh lỗi)
     std::cout << "\nDu doan 10 anh dau tien trong tap test\n";
-    std::vector<float> first_10_data(10 * input_size);
-    for (int i = 0; i < 10; ++i) {
-        std::copy(test_images[i].begin(), test_images[i].end(), first_10_data.begin() + i * input_size);
-    }
     
-    CUDA_CHECK(cudaMemcpy(d_batch_input, first_10_data.data(), 10 * input_size * sizeof(float), cudaMemcpyHostToDevice));
-    
-    float* out1 = l1.forward(d_batch_input, 10);
-    float* out2 = l2.forward(out1, 10);
-    float* out3 = l3.forward(out2, 10);
-    
-    softmax_kernel<<<1, 256>>>(out3, d_batch_probs, 10, 10);
-    CUDA_CHECK(cudaGetLastError());
-    
-    std::vector<float> h_probs(10 * 10);
-    CUDA_CHECK(cudaMemcpy(h_probs.data(), d_batch_probs, 10 * 10 * sizeof(float), cudaMemcpyDeviceToHost));
+    // Cấp phát bộ nhớ cho 1 ảnh để prediction
+    float *d_single_input, *d_single_probs;
+    CUDA_CHECK(cudaMalloc(&d_single_input, input_size * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_single_probs, 10 * sizeof(float)));
     
     for (int i = 0; i < 10; ++i) {
-        std::vector<float> sample_probs(h_probs.begin() + i * 10, h_probs.begin() + (i + 1) * 10);
-        int pred = std::distance(sample_probs.begin(), std::max_element(sample_probs.begin(), sample_probs.end()));
+        // Copy 1 ảnh lên GPU
+        CUDA_CHECK(cudaMemcpy(d_single_input, test_images[i].data(), input_size * sizeof(float), cudaMemcpyHostToDevice));
+        
+        // Forward pass với batch_size = 1
+        float* out1 = l1.forward(d_single_input, 1);
+        float* out2 = l2.forward(out1, 1);
+        float* out3 = l3.forward(out2, 1);
+        
+        // Softmax cho 1 ảnh
+        softmax_kernel<<<1, 256>>>(out3, d_single_probs, 1, 10);
+        CUDA_CHECK(cudaGetLastError());
+        
+        // Tải kết quả về CPU
+        std::vector<float> h_probs(10);
+        CUDA_CHECK(cudaMemcpy(h_probs.data(), d_single_probs, 10 * sizeof(float), cudaMemcpyDeviceToHost));
+        
+        int pred = std::distance(h_probs.begin(), std::max_element(h_probs.begin(), h_probs.end()));
         std::cout << "Anh thu " << i + 1 << ": Nhan thuc te = " << test_labels[i] << ", Du doan = " << pred << "\n";
     }
     
-    // Giải phóng bộ nhớ
-    l1.free_io_memory();
-    l2.free_io_memory();
-    l3.free_io_memory();
+    // Giải phóng bộ nhớ prediction
+    cudaFree(d_single_input);
+    cudaFree(d_single_probs);
     
+    // Giải phóng bộ nhớ chính
     cudaFree(d_batch_input);
     cudaFree(d_batch_probs);
     cudaFree(d_batch_output);
